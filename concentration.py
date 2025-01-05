@@ -2,241 +2,165 @@ import pandas as pd
 import os
 import geopandas as gpd
 import matplotlib.pyplot as plt
-import unidecode 
+import unidecode
 import requests
 import re
 
-# Mostrar diretório
+# Show current directory
 print(os.getcwd())
 
-# Mudar o diretório
-os.chdir('C:/Users//Dados')
+# Change directory
+os.chdir('/path/to/data_directory')
 
-# Ler o CSV, mudar o codificador e o separador, converter para o tipo DataFrame
-postos = pd.read_csv("dados-cadastrais-revendedores-varejistas-combustiveis-automoveis.csv", encoding='latin1', sep=';', decimal=',').convert_dtypes()
-postos = postos[['UF', 'MUNICIPIO', 'BANDEIRA']]
+# Read the CSV file, change encoding and separator, and convert to DataFrame type
+stations = pd.read_csv("fuel_station_data.csv", encoding='latin1', sep=';', decimal=',').convert_dtypes()
+stations = stations[['UF', 'MUNICIPIO', 'BANDEIRA']]
 
-# Substitui as bandeiras conforme as especificações
-postos['BANDEIRA'] = postos['BANDEIRA'].replace({
+# Replace brands as specified
+stations['BANDEIRA'] = stations['BANDEIRA'].replace({
     'RAIZEN MIME': 'RAIZEN',
     'SABBÃ': 'RAIZEN',
     'RAIZEN': 'RAIZEN'
 })
 
-# Define as bandeiras de interesse
-bandeiras_interesse = ['VIBRA', 'IPIRANGA', 'BANDEIRA BRANCA', 'RAIZEN']
+# Define the brands of interest
+brands_of_interest = ['VIBRA', 'IPIRANGA', 'BANDEIRA BRANCA', 'RAIZEN']
 
-# Substitui todas as bandeiras que não estão na lista de interesse por 'OTHERS'
-postos['BANDEIRA'] = postos['BANDEIRA'].apply(lambda x: x if x in bandeiras_interesse else 'OTHERS')
+# Replace all brands not in the list of interest with 'OTHERS'
+stations['BANDEIRA'] = stations['BANDEIRA'].apply(lambda x: x if x in brands_of_interest else 'OTHERS')
 
-# Agrupe por MUNICIPIO, contando as bandeiras
-bandeira_count = postos.groupby(['MUNICIPIO', 'BANDEIRA']).size().reset_index(name='COUNT')
+# Group by MUNICIPIO, counting the brands
+brand_count = stations.groupby(['MUNICIPIO', 'BANDEIRA']).size().reset_index(name='COUNT')
 
-# Passo 1: Calcular o total de postos por município
-total_count = bandeira_count.groupby('MUNICIPIO')['COUNT'].transform('sum')
+# Step 1: Calculate the total number of stations per municipality
+total_count = brand_count.groupby('MUNICIPIO')['COUNT'].transform('sum')
 
-# Passo 2: Calcular a quantidade relativa da bandeira
-bandeira_count['RELATIVA'] = bandeira_count['COUNT'] / total_count
+# Step 2: Calculate the relative count for each brand
+brand_count['RELATIVE'] = brand_count['COUNT'] / total_count
 
+# Pivot table with relative counts by municipality and brand
+pivot_brand_count = brand_count.pivot_table(index=['MUNICIPIO'], 
+                                            columns='BANDEIRA', 
+                                            values='RELATIVE', 
+                                            fill_value=0)
 
-pivot_bandeira_count = bandeira_count.pivot_table(index=['MUNICIPIO'], 
-                           columns='BANDEIRA', 
-                           values='RELATIVA', 
-                           fill_value=0)
-# Carregar o shapefile dos municípios
-mapa_municipios = gpd.read_file('C:/Users/jaotr/OneDrive/Documentos/GMF/CFA/BR_Municipios_2022/BR_Municipios_2022.shp')
+# Load the shapefile for municipalities
+municipality_map = gpd.read_file('/path/to/municipality_shapefile.shp')
 
-# Definir cores usando colormaps do Matplotlib
-cmap = plt.cm.get_cmap('Blues', len(bandeiras_interesse))  # Usar um colormap adequado
+# Normalize municipality names
+municipality_map['NM_MUN'] = municipality_map['NM_MUN'].str.lower()
+municipality_map['NM_MUN'] = municipality_map['NM_MUN'].apply(unidecode.unidecode)
+municipality_map['NM_MUN'] = municipality_map['NM_MUN'].str.strip()
 
-mapa_municipios['NM_MUN']
+brand_count['MUNICIPIO'] = brand_count['MUNICIPIO'].str.lower()
+brand_count['MUNICIPIO'] = brand_count['MUNICIPIO'].apply(unidecode.unidecode)
+brand_count['MUNICIPIO'] = brand_count['MUNICIPIO'].str.strip()
 
-mapa_municipios['NM_MUN'] = mapa_municipios['NM_MUN'].str.lower()  # Converte para minúsculas
-mapa_municipios['NM_MUN'] = mapa_municipios['NM_MUN'].apply(unidecode.unidecode)  # Remove acentos
-mapa_municipios['NM_MUN'] = mapa_municipios['NM_MUN'].str.strip()  # Remove espaços em branco
+brands = ['VIBRA', 'IPIRANGA', 'BANDEIRA BRANCA', 'RAIZEN', 'OTHERS']
 
-bandeira_count['MUNICIPIO'] = bandeira_count['MUNICIPIO'].str.lower()  # Converte para minúsculas
-bandeira_count['MUNICIPIO'] = bandeira_count['MUNICIPIO'].apply(unidecode.unidecode)  # Remove acentos
-bandeira_count['MUNICIPIO'] = bandeira_count['MUNICIPIO'].str.strip()  # Remove espaços em branco
-
-bandeiras_i = ['VIBRA', 'IPIRANGA', 'BANDEIRA BRANCA', 'RAIZEN', 'OTHERS']
-# Gerar um gráfico para cada bandeira
-for bandeira in bandeiras_i:
-    # Unir os dados de concentração da bandeira com o shapefile
-    temp_map = mapa_municipios.merge(bandeira_count[bandeira_count['BANDEIRA'] == bandeira], 
-                                       how='left', left_on='NM_MUN', right_on='MUNICIPIO')
+# Generate a map for each brand
+for brand in brands:
+    temp_map = municipality_map.merge(brand_count[brand_count['BANDEIRA'] == brand], 
+                                      how='left', left_on='NM_MUN', right_on='MUNICIPIO')
     
-    # Preencher NaN com 0
-    temp_map['RELATIVA'] = temp_map['RELATIVA'].fillna(0)
+    temp_map['RELATIVE'] = temp_map['RELATIVE'].fillna(0)
 
-    # Plotar o mapa}
+    # Plot the map
     fig, ax = plt.subplots(1, 1, figsize=(15, 10))
-    
-    # Remover as fronteiras
-    temp_map.plot(column='RELATIVA', ax=ax, legend=True,
-                  legend_kwds={'label': f"Proporção Relativa da {bandeira}",
+    temp_map.plot(column='RELATIVE', ax=ax, legend=True,
+                  legend_kwds={'label': f"Relative Proportion of {brand}",
                                'orientation': "horizontal"},
-                  cmap=cmap, missing_kwds={"color": "lightgrey"})  # Use o cmap aqui, YlGn, lightgrey
+                  cmap='Blues', missing_kwds={"color": "lightgrey"})
 
-    # Ajustar título
-    plt.title(f'Concentração da Bandeira {bandeira} nos Municípios do Brasil', fontsize=16)
+    plt.title(f'Relative Concentration of {brand} in Brazilian Municipalities', fontsize=16)
     plt.xlabel('Longitude')
     plt.ylabel('Latitude')
-    plt.axis('off')  # Desligar os eixos para uma visualização limpa
-    plt.savefig(f'concentracao_bandeira_{bandeira.lower()}.png', format='png', transparent=True, dpi=600)
+    plt.axis('off')
+    plt.savefig(f'{brand.lower()}_concentration.png', format='png', transparent=True, dpi=600)
     plt.show()
 
-# Mostrar diretório
-print(os.getcwd())
-
-# Mudar o diretório
-os.chdir('C:/Users//VBBR/Dados')
-
-# Ler o CSV, mudar o codificador e o separador, converter para o tipo DataFrame
-postos = pd.read_csv("dados-cadastrais-revendedores-varejistas-combustiveis-automoveis.csv", encoding='latin1', sep=';', decimal=',').convert_dtypes()
-postos = postos[['UF', 'MUNICIPIO', 'BANDEIRA']]
-
-# Substitui as bandeiras conforme as especificações
-postos['BANDEIRA'] = postos['BANDEIRA'].replace({
-    'RAIZEN MIME': 'RAIZEN',
-    'SABBÃ': 'RAIZEN',
-    'RAIZEN': 'RAIZEN'
-})
-
-# Define as bandeiras de interesse
-bandeiras_interesse = ['VIBRA', 'IPIRANGA', 'BANDEIRA BRANCA', 'RAIZEN']
-
-# Substitui todas as bandeiras que não estão na lista de interesse por 'OTHERS'
-postos['BANDEIRA'] = postos['BANDEIRA'].apply(lambda x: x if x in bandeiras_interesse else 'OTHERS')
-
-# Agrupe por MUNICIPIO, contando as bandeiras
-bandeira_count = postos.groupby(['MUNICIPIO', 'BANDEIRA']).size().reset_index(name='COUNT')
-
-# Passo 1: Calcular o total de postos por município
-total_count = bandeira_count.groupby('MUNICIPIO')['COUNT'].transform('sum')
-
-# Passo 2: Calcular a quantidade relativa da bandeira
-bandeira_count['RELATIVA'] = bandeira_count['COUNT'] / total_count
-
-
-pivot_bandeira_count = bandeira_count.pivot_table(index=['MUNICIPIO'], 
-                           columns='BANDEIRA', 
-                           values='RELATIVA', 
-                           fill_value=0)
-
-pivot_bandeira_count.to_excel('C:/Users//pivot_bandeira_count.xlsx', index = True)
-
-
+# Process and analyze population and GDP data
 def get_ibge_data(endpoint):
     response = requests.get(endpoint)
     if response.status_code == 200:
         return response.json()
     else:
-        raise Exception(f"Erro ao acessar a API do IBGE: {response.status_code}")
+        raise Exception(f"Error accessing IBGE API: {response.status_code}")
 
-# Função para obter dados de população por município
-def get_populacao_municipios():
-    url = "https://servicodados.ibge.gov.br/api/v3/agregados/4709/periodos/2022/variaveis/93|10605?localidades=N6[all]"
-    response = requests.get(url)
-    if response.status_code == 200:
-        return response.json()
-    else:
-        raise Exception(f"Erro ao acessar a API do IBGE: {response.status_code}")
-
-# Função para obter dados de PIB por município
-def get_pib_municipios():
-    url = "https://servicodados.ibge.gov.br/api/v3/agregados/5938/periodos/2021/variaveis/37?localidades=N6[all]"
-    response = requests.get(url)
-    if response.status_code == 200:
-        return response.json()
-    else:
-        raise Exception(f"Erro ao acessar a API do IBGE: {response.status_code}")
-
- #Função para processar dados de população
-def process_populacao_data(data):
-    municipios = []
-    for resultado in data[0]['resultados']:
-        for serie in resultado['series']:
-            municipio = serie['localidade']['nome'].lower().strip()
-            populacao = serie['serie']['2022']
-            municipios.append({
-                'MUNICIPIO': municipio,
-                'POPULACAO': populacao
+# Other functions for processing data follow...
+# Function to process population data
+def process_population_data(data):
+    municipalities = []
+    for result in data[0]['resultados']:
+        for series in result['series']:
+            municipality = series['localidade']['nome'].lower().strip()
+            population = series['serie']['2022']
+            municipalities.append({
+                'MUNICIPIO': municipality,
+                'POPULATION': population
             })
-    return pd.DataFrame(municipios)
+    return pd.DataFrame(municipalities)
 
-# Função para processar dados de PIB
-def process_pib_data(data):
-    municipios = []
-    for resultado in data[0]['resultados']:
-        for serie in resultado['series']:
-            municipio = serie['localidade']['nome'].lower().strip()
-            pib = serie['serie']['2021']
-            municipios.append({
-                'MUNICIPIO': municipio,
-                'PIB': pib
+# Function to process GDP data
+def process_gdp_data(data):
+    municipalities = []
+    for result in data[0]['resultados']:
+        for series in result['series']:
+            municipality = series['localidade']['nome'].lower().strip()
+            gdp = series['serie']['2021']
+            municipalities.append({
+                'MUNICIPIO': municipality,
+                'GDP': gdp
             })
-    return pd.DataFrame(municipios)
+    return pd.DataFrame(municipalities)
 
-# Função para remover UF do nome do município
-def remover_uf(nome):
-    return re.sub(r' - [a-z]{2}$', '', nome)
+# Function to remove state abbreviation from municipality names
+def remove_state_abbreviation(name):
+    return re.sub(r' - [a-z]{2}$', '', name)
 
-# Obter e processar os dados de população
-populacao_data = get_ibge_data("https://servicodados.ibge.gov.br/api/v3/agregados/4709/periodos/2022/variaveis/93|10605?localidades=N6[all]")
-populacao_df = process_populacao_data(populacao_data)
+# Fetch and process population data
+population_data = get_ibge_data("https://servicodados.ibge.gov.br/api/v3/agregados/4709/periodos/2022/variaveis/93|10605?localidades=N6[all]")
+population_df = process_population_data(population_data)
 
-# Obter e processar os dados de PIB
-pib_data = get_ibge_data("https://servicodados.ibge.gov.br/api/v3/agregados/5938/periodos/2021/variaveis/37?localidades=N6[all]")
-pib_df = process_pib_data(pib_data)
+# Fetch and process GDP data
+gdp_data = get_ibge_data("https://servicodados.ibge.gov.br/api/v3/agregados/5938/periodos/2021/variaveis/37?localidades=N6[all]")
+gdp_df = process_gdp_data(gdp_data)
 
-# Remover UF dos nomes dos municípios
-populacao_df['MUNICIPIO'] = populacao_df['MUNICIPIO'].apply(remover_uf).apply(unidecode.unidecode).str.strip()
-pib_df['MUNICIPIO'] = pib_df['MUNICIPIO'].apply(remover_uf).apply(unidecode.unidecode).str.strip()
+# Clean municipality names
+population_df['MUNICIPIO'] = population_df['MUNICIPIO'].apply(remove_state_abbreviation).apply(unidecode.unidecode).str.strip()
+gdp_df['MUNICIPIO'] = gdp_df['MUNICIPIO'].apply(remove_state_abbreviation).apply(unidecode.unidecode).str.strip()
 
-# Carregar o DataFrame original
-#pivot_bandeira_count = pd.read_excel('C:/Users/jaotr/OneDrive/Documentos/GMF/CFA/VBBR/Dados/your_original_data.xlsx')
-pivot_bandeira_count = pivot_bandeira_count.reset_index()
-pivot_bandeira_count['MUNICIPIO'] = pivot_bandeira_count['MUNICIPIO'].str.lower().apply(unidecode.unidecode).str.strip()
+# Merge data with pivot table
+pivot_brand_count = pivot_brand_count.reset_index()
+pivot_brand_count['MUNICIPIO'] = pivot_brand_count['MUNICIPIO'].str.lower().apply(unidecode.unidecode).str.strip()
 
-# Combinar dados de população
-combined_df = pivot_bandeira_count.merge(populacao_df, on='MUNICIPIO', how='left')
+combined_df = pivot_brand_count.merge(population_df, on='MUNICIPIO', how='left')
+combined_df = combined_df.merge(gdp_df, on='MUNICIPIO', how='left')
 
-# Combinar dados de PIB
-combined_df = combined_df.merge(pib_df, on='MUNICIPIO', how='left')
+# Ensure GDP and population are numeric
+combined_df['GDP'] = combined_df['GDP'].astype(float) * 1000
+combined_df['POPULATION'] = pd.to_numeric(combined_df['POPULATION'], errors='coerce')
 
-# Multiplicando o PIB por 1000
-# Multiplicando o PIB por 1000
-combined_df['PIB'] = combined_df['PIB'].astype(float) * 1000
+# Calculate GDP per capita
+combined_df['GDP per capita'] = combined_df['GDP'] / combined_df['POPULATION']
 
-# Garantindo que a população também seja numérica
-combined_df['POPULACAO'] = pd.to_numeric(combined_df['POPULACAO'], errors='coerce')
+# Analyze municipalities with the highest concentration for each brand
+n_top = 200  # Number of top municipalities to analyze
 
-# Calculando o PIB per capita
-combined_df['PIB per capita'] = combined_df['PIB'] / combined_df['POPULACAO']
-
-# Exibindo as primeiras linhas para verificar o resultado
-print(combined_df[['MUNICIPIO', 'PIB per capita']].head())
-
-# Defina o número de municípios que você deseja analisar
-n_top = 200  # Por exemplo, os 10 principais
-
-# Analisando a Vibra
-top_vibra = combined_df.nlargest(n_top, 'VIBRA')[['MUNICIPIO', 'POPULACAO', 'PIB', 'PIB per capita', 'VIBRA']]
-print("Municípios com maior concentração de Vibra:")
+# Top municipalities for Vibra
+top_vibra = combined_df.nlargest(n_top, 'VIBRA')[['MUNICIPIO', 'POPULATION', 'GDP', 'GDP per capita', 'VIBRA']]
+print("Municipalities with the highest concentration of Vibra:")
 print(top_vibra)
-#top_vibra.to_excel('C:/Users/jaotr/OneDrive/Documentos/GMF/CFA/DataAnalysis/top_vibra.xlsx', index = False)
 
-# Analisando a Ipiranga
-top_ipiranga = combined_df.nlargest(n_top, 'IPIRANGA')[['MUNICIPIO', 'POPULACAO', 'PIB', 'PIB per capita', 'IPIRANGA']]
-print("\nMunicípios com maior concentração de Ipiranga:")
+# Top municipalities for Ipiranga
+top_ipiranga = combined_df.nlargest(n_top, 'IPIRANGA')[['MUNICIPIO', 'POPULATION', 'GDP', 'GDP per capita', 'IPIRANGA']]
+print("\nMunicipalities with the highest concentration of Ipiranga:")
 print(top_ipiranga)
-#top_ipiranga.to_excel('C:/Users/jaotr/OneDrive/Documentos/GMF/CFA/DataAnalysis/top_ipiranga.xlsx', index = False)
 
-# Analisando a Raízen
-top_raizen = combined_df.nlargest(n_top, 'RAIZEN')[['MUNICIPIO', 'POPULACAO', 'PIB', 'PIB per capita', 'RAIZEN']]
-print("\nMunicípios com maior concentração de Raízen:")
+# Top municipalities for Raízen
+top_raizen = combined_df.nlargest(n_top, 'RAIZEN')[['MUNICIPIO', 'POPULATION', 'GDP', 'GDP per capita', 'RAIZEN']]
+print("\nMunicipalities with the highest concentration of Raízen:")
 print(top_raizen)
 
-# Exibir as primeiras linhas do DataFrame combinado
+# Display combined dataframe
 print(combined_df.head())
